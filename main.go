@@ -23,6 +23,8 @@ type WatchedDir struct {
 	fileChanged chan fsnotify.Event
 }
 
+var includeHidden = flag.Bool("include-hidden", false, "Recurse into hidden directories")
+
 var _extensions []string
 
 func SetExtentions(s []string) { _extensions = s }
@@ -33,6 +35,12 @@ func (w *WatchedDir) Files() map[string]string {
 
 func (w *WatchedDir) watchEvents() {
 	for evt := range w.watcher.Events {
+		if evt.Op == fsnotify.Chmod {
+			continue
+		}
+		if *includeHidden == false && isHidden(evt.Name) {
+			continue
+		}
 		if evt.Op == fsnotify.Create || evt.Op == fsnotify.Remove {
 			w.indexLock.Lock()
 			key := getKey(evt.Name)
@@ -104,6 +112,17 @@ func getKey(fullname string) string {
 	return bn
 }
 
+func isHidden(name string) bool {
+	segments := strings.Split(name, "/")
+	for _, n := range segments {
+		if len(n) > 1 && n[0] == '.' {
+			return true
+
+		}
+	}
+	return false
+}
+
 func Create(root string, recursive, watch bool) *WatchedDir {
 	var w = WatchedDir{root: root, recursive: recursive, fileChanged: make(chan fsnotify.Event)}
 	watcher, _ := fsnotify.NewWatcher()
@@ -112,6 +131,9 @@ func Create(root string, recursive, watch bool) *WatchedDir {
 		if recursive {
 			filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 				if d.IsDir() {
+					if *includeHidden == false && isHidden(d.Name()) {
+						return nil
+					}
 					err := watcher.Add(path)
 					if err != nil {
 						log.Printf("Error adding watch: %v", err.Error())
@@ -134,31 +156,40 @@ func Create(root string, recursive, watch bool) *WatchedDir {
 
 var command = ""
 
+func sanitize(s string) string {
+	charset := []rune{'\\', '|', '&', '$', '!', ';', '{', '}', '(', ')', '?', '+', '<', '>', '\'', '"', '~', '`', '*', '#', '[', ']'}
+	for _, c := range charset {
+		s = strings.ReplaceAll(s, string(c), `\`+string(c))
+	}
+	return s
+}
+
 func watchItem(item string) {
 	watcher := Create(item, true, true)
 	watcher.WaitForIndex()
 
 	for evt := range watcher.fileChanged {
-		if evt.Op != fsnotify.Write {
+		if evt.Op == fsnotify.Chmod {
 			continue
 		}
-		log.Printf("evt: %v\n", evt)
 		if command != "" {
-			c := strings.ReplaceAll(command, "{}", evt.Name)
+			opname := sanitize(evt.Op.String())
+			filename := sanitize(evt.Name)
+			c := strings.ReplaceAll(command, "%f", filename)
+			c = strings.ReplaceAll(c, "%e", opname)
+
 			cmd := exec.Command("bash", "-c", c)
-			log.Printf("Running bash -c '%v'\n", c)
 			out, err := cmd.CombinedOutput()
 			if err != nil {
-				log.Printf("Error running command: %v\n", err)
+				log.Printf("Error running command %v: %v\n", c, err)
 			}
-			fmt.Printf(string(out))
+			fmt.Print(string(out))
 		}
 	}
 }
 
 func main() {
 	var help = flag.Bool("help", false, "Show help")
-	// var quiet = *flag.Bool("quiet", false, "Disable logging") || *flag.Bool("q", false, "Disable logging")
 
 	log.SetFlags(0)
 	flag.StringVar(&command, "command", "", "The command to run when the file changes")

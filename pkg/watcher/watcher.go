@@ -12,24 +12,30 @@ import (
 )
 
 func (w *WatchedDir) walkAndAddAll(root string, emit bool) {
-	filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if d.IsDir() {
-			if w.includeHidden == false && isHidden(d.Name()) {
-				return nil
+	if isDir(root) {
+		filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+			if d.IsDir() {
+				if w.includeHidden == false && isHidden(d.Name()) {
+					return nil
+				}
+				err := w.watcher.Add(path)
+				if err != nil {
+					log.Printf("Error adding watch: %v", err.Error())
+				}
 			}
-			err := w.watcher.Add(path)
-			if err != nil {
-				log.Printf("Error adding watch: %v", err.Error())
+
+			if path != root && emit {
+				w.watcher.Events <- fsnotify.Event{Op: fsnotify.Create, Name: path}
 			}
+
+			return nil
+		})
+	} else {
+		err := w.watcher.Add(root)
+		if err != nil {
+			log.Printf("Error adding watch: %v", err.Error())
 		}
-
-		if path != root && emit {
-			w.watcher.Events <- fsnotify.Event{Op: fsnotify.Create, Name: path}
-		}
-
-		return nil
-	})
-
+	}
 }
 
 func Create(root string) *WatchedDir {
@@ -92,7 +98,7 @@ func WatchItem(item string, includeHidden bool, onChange func(op fsnotify.Op, pa
 
 	for evt := range watcher.fileChanged {
 		// Sometimes duplicate events are emitted, e.g.
-		// 1: REMOVE ./a 
+		// 1: REMOVE ./a
 		// 2: REMOVE a
 		// Let's just always remove leading './'
 		if len(evt.Name) > 2 && evt.Name[:2] == "./" {

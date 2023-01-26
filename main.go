@@ -50,10 +50,5 @@ func main() {
 		return
 	}
 
-	for _, item := range items {
-		go watcher.WatchItem(item, *includeHidden, OnChange)
-	}
-
-	select {}
-
+	watcher.WatchItems(items, *includeHidden, OnChange)
 }

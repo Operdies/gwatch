@@ -38,10 +38,12 @@ func (w *WatchedDir) walkAndAddAll(root string, emit bool) {
 	}
 }
 
-func Create(root string) *WatchedDir {
-	var w = WatchedDir{root: root, fileChanged: make(chan fsnotify.Event)}
+func Create(paths []string) *WatchedDir {
+	var w = WatchedDir{fileChanged: make(chan fsnotify.Event)}
 	w.watcher, _ = fsnotify.NewWatcher()
-	w.walkAndAddAll(root, false)
+	for _, p := range paths {
+		w.walkAndAddAll(p, false)
+	}
 	return &w
 }
 
@@ -66,7 +68,6 @@ func (w *WatchedDir) watchEvents() {
 }
 
 type WatchedDir struct {
-	root          string
 	isIndexed     bool
 	watcher       *fsnotify.Watcher
 	fileChanged   chan fsnotify.Event
@@ -89,8 +90,8 @@ func isDir(item string) bool {
 	return stat.IsDir()
 }
 
-func WatchItem(item string, includeHidden bool, onChange func(op fsnotify.Op, path string)) {
-	watcher := Create(item)
+func WatchItems(items []string, includeHidden bool, onChange func(op fsnotify.Op, path string)) {
+	watcher := Create(items)
 	watcher.includeHidden = includeHidden
 	go watcher.watchEvents()
 

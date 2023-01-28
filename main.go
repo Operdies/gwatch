@@ -125,7 +125,7 @@ func main() {
 	var mode string
 	flag.StringVar(&mode, "mode", "Concurrent", `Event backlog behavior.
 Concurrent: 
-    Run the command concurrently whenever an event is fired, even if previous handlers has not yet finished 
+    Run the command concurrently whenever an event is fired, even if previous handlers have not yet finished 
 Queue: 
     Queue events and run the handler in sequence 
 Block: 
@@ -138,10 +138,9 @@ Kill:
 	flag.StringVar(&eventString, "eventMask", "Create|Write|Remove|Rename|Chmod", "Mask of events to watch.")
 
 	flag.StringVar(&Command, "command", "echo %e %f",
-		`The command to run when the file changes.
-The command is invoked like "bash -c '<command>'"
-Simple string replacement is supported to identify what happened:
-  %e: The mask of events that was triggered (e.g. CHMOD|WRITE is possible)
+		`The command to run when a file changes. Invoked as "bash -c '<command>'"
+Simple string replacement is supported to respond to what happened:
+  %e: The mask of events that were triggered (e.g. CHMOD|WRITE is possible)
   %f: Relative path to the file
 Shell control characters are quoted when macros are expanded, so a file named a&b will expand to a\&b etc.
 No escaping is done on the provided command.`)

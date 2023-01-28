@@ -1,6 +1,8 @@
 # gwatch
-GO commandline utility for running a command when an event occurs, with support for simple replacements.
-Any number of positional directories can be specified, and they are recursively watched.
+CLI utility for running a command when an event occurs.
+Any number of files and directories can be specified, and they are recursively watched.
+
+This utility is made possible by the excellent [fsnotify](https://github.com/fsnotify/fsnotify) 
 
 ## Example Usage:
 ```bash
@@ -15,14 +17,18 @@ $ touch b
 CREATE b
 ```
 
-## Help Text 
+## Install 
+```bash 
+$ go install github.com/operdies/gwatch@latest
+```
+
+## Usage
 ```
 Usage: gwatch [OPTIONS]... [PATHS]...
   -command string (default "echo %e %f")
-	The command to run when the file changes.
-	The command is invoked like "bash -c '<command>'"
-	Simple string replacement is supported to identify what happened:
-	  %e: The mask of events that was triggered (e.g. CHMOD|WRITE is possible)
+	The command to run when a file changes. Invoked as "bash -c '<command>'"
+	Simple string replacement is supported to respond to what happened:
+	  %e: The mask of events that were triggered (e.g. CHMOD|WRITE is possible)
 	  %f: Relative path to the file
 	Shell control characters are quoted when macros are expanded, so a file named a&b will expand to a\&b etc.
 	No escaping is done on the provided command.
@@ -31,7 +37,7 @@ Usage: gwatch [OPTIONS]... [PATHS]...
   -mode string (default "Concurrent")
 	Event backlog behavior.
 	Concurrent: 
-	    Run the command concurrently whenever an event is fired, even if previous handlers has not yet finished 
+	    Run the command concurrently whenever an event is fired, even if previous handlers have not yet finished 
 	Queue: 
 	    Queue events and run the handler in sequence 
 	Block: 
@@ -56,3 +62,4 @@ Usage: gwatch [OPTIONS]... [PATHS]...
         For the same reason, it is not possible to watch a file which does not yet exist.
         This restriction does not apply if instead the directory containing the file is being watched.
 ```
+

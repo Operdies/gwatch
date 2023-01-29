@@ -15,7 +15,7 @@ import (
 var Command string
 var options watcher.Options
 
-func OnChange(op fsnotify.Op, path string, context context.Context) {
+var OnChange watcher.Handler = func(op fsnotify.Op, path string, context context.Context) {
 	if Command == "" {
 		return
 	}
@@ -174,10 +174,10 @@ No escaping is done on the provided command.`)
 		IncludeHidden: *includeHidden,
 		Mode:          m,
 		EventMask:     eventMask,
-		Handler:       OnChange,
 	}
-  err = watcher.WatchItems(items, &options)
-  if err != nil {
-    fmt.Printf("Error: %v\n", err)
-  }
+
+	err = watcher.WatchItems(items, &options, OnChange)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+	}
 }

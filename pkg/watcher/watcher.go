@@ -31,7 +31,7 @@ type Mode struct {
 	mode int
 }
 
-func (m Mode) ToString() string {
+func (m Mode) String() string {
 	if m == Concurrent {
 		return "Concurrent"
 	}
@@ -48,19 +48,21 @@ func (m Mode) ToString() string {
 }
 
 func GetMode(m string) (mode Mode, err error) {
-	if m == Concurrent.ToString() {
+	if strings.EqualFold(m, Concurrent.String()) {
 		mode = Concurrent
-	} else if m == Queue.ToString() {
+	} else if strings.EqualFold(m, Queue.String()) {
 		mode = Queue
-	} else if m == Block.ToString() {
+	} else if strings.EqualFold(m, Block.String()) {
 		mode = Block
-	} else if m == Kill.ToString() {
+	} else if strings.EqualFold(m, Kill.String()) {
 		mode = Kill
 	} else {
 		err = fmt.Errorf("No such mode '%v'", m)
 	}
 	return mode, err
 }
+
+type Handler func(op fsnotify.Op, path string, ctx context.Context)
 
 type Options struct {
 	// Only valid if Mode is Queue
@@ -69,10 +71,28 @@ type Options struct {
 	Mode Mode
 	// Whether or not to watch hidden files and directories
 	IncludeHidden bool
-	// The function which is invoked when an event occurs
-	Handler func(op fsnotify.Op, path string, ctx context.Context)
 	// Mask of events to watch
 	EventMask fsnotify.Op
+}
+
+func (options *Options) String() string {
+	if options.Mode == Queue {
+		return fmt.Sprintf(`QueueSize: %v
+Mode: %v 
+IncludeHidden: %v 
+Events: %v`,
+			options.QueueSize,
+			options.Mode.String(),
+			options.IncludeHidden,
+			options.EventMask.String())
+	} else {
+		return fmt.Sprintf(`Mode: %v 
+IncludeHidden: %v 
+Events: %v`,
+			options.Mode.String(),
+			options.IncludeHidden,
+			options.EventMask.String())
+	}
 }
 
 func isDir(item string) bool {
@@ -97,7 +117,7 @@ func (w *WatchedDir) walkAndAddAll(root string, emit bool) {
 				}
 				err := w.watcher.Add(path)
 				if err != nil {
-					fmt.Printf("Error adding watch: %v", err.Error())
+					fmt.Printf("Error adding watch: %v\n", err.Error())
 				}
 			}
 
@@ -163,6 +183,8 @@ type WatchedDir struct {
 	watcher     *fsnotify.Watcher
 	fileChanged chan fsnotify.Event
 	options     *Options
+	// The function which is invoked when an event occurs
+	handler Handler
 }
 
 func Sanitize(s string) string {
@@ -187,7 +209,7 @@ func concurrentDispatcher(w *WatchedDir) error {
 		if err != nil {
 			return err
 		}
-		go w.options.Handler(evt.Op, evt.Name, context.Background())
+		go w.handler(evt.Op, evt.Name, context.Background())
 	}
 }
 
@@ -200,19 +222,19 @@ func killDispatcher(w *WatchedDir) error {
 			return err
 		}
 		ctx, cancel = context.WithCancel(context.Background())
-		go w.options.Handler(evt.Op, evt.Name, ctx)
+		go w.handler(evt.Op, evt.Name, ctx)
 	}
 }
 
 func queueDispatcher(w *WatchedDir, n int) (err error) {
 	queue := make(chan fsnotify.Event, n)
 	go func() {
-    var evt fsnotify.Event
+		var evt fsnotify.Event
 		for {
 			evt, err = w.nextEvent()
 			if err != nil {
-        close(queue)
-        return
+				close(queue)
+				return
 			}
 			select {
 			// If the buffer is not full, add the new event
@@ -226,9 +248,9 @@ func queueDispatcher(w *WatchedDir, n int) (err error) {
 	}()
 
 	for evt := range queue {
-		w.options.Handler(evt.Op, evt.Name, context.Background())
+		w.handler(evt.Op, evt.Name, context.Background())
 	}
-  return
+	return
 }
 
 func blockingDispatcher(w *WatchedDir) error {
@@ -236,24 +258,21 @@ func blockingDispatcher(w *WatchedDir) error {
 	for {
 		evt, err := w.nextEvent()
 		if err != nil {
-      return err
+			return err
 		}
 		if mut.TryLock() {
 			e := evt
 			go func() {
-				w.options.Handler(e.Op, e.Name, context.Background())
+				w.handler(e.Op, e.Name, context.Background())
 				mut.Unlock()
 			}()
 		}
 	}
 }
 
-func WatchItems(items []string, options *Options) (err error) {
+func WatchItems(items []string, options *Options, handler Handler) (err error) {
 	if options == nil {
 		panic("No options set.")
-	}
-	if options.Handler == nil {
-		panic("No handler set.")
 	}
 
 	watcher := Create(items, options)
@@ -269,5 +288,5 @@ func WatchItems(items []string, options *Options) (err error) {
 	case Queue:
 		err = queueDispatcher(watcher, options.QueueSize)
 	}
-  return
+	return
 }

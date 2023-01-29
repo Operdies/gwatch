@@ -176,5 +176,8 @@ No escaping is done on the provided command.`)
 		EventMask:     eventMask,
 		Handler:       OnChange,
 	}
-	watcher.WatchItems(items, &options)
+  err = watcher.WatchItems(items, &options)
+  if err != nil {
+    fmt.Printf("Error: %v\n", err)
+  }
 }

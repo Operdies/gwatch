@@ -75,6 +75,19 @@ type Options struct {
 	EventMask fsnotify.Op
 }
 
+func isDir(item string) bool {
+	stat, err := os.Stat(item)
+	if err != nil {
+		return false
+	}
+	return stat.IsDir()
+}
+
+func fileExists(file string) bool {
+	_, err := os.Stat(file)
+	return err == nil
+}
+
 func (w *WatchedDir) walkAndAddAll(root string, emit bool) {
 	if isDir(root) {
 		filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -94,10 +107,10 @@ func (w *WatchedDir) walkAndAddAll(root string, emit bool) {
 
 			return nil
 		})
-	} else {
+	} else if fileExists(root) { // verify the file hasn't already been deleted
 		err := w.watcher.Add(root)
 		if err != nil {
-			fmt.Printf("Error adding watch: %v", err.Error())
+			fmt.Printf("Error adding watch: %v\n", err.Error())
 		}
 	}
 }
@@ -116,7 +129,6 @@ func isHidden(name string) bool {
 	for _, n := range segments {
 		if len(n) > 1 && n[0] == '.' {
 			return true
-
 		}
 	}
 	return false
@@ -161,53 +173,71 @@ func Sanitize(s string) string {
 	return s
 }
 
-func isDir(item string) bool {
-	stat, err := os.Stat(item)
-	if err != nil {
-		return false
+func (w *WatchedDir) nextEvent() (evt fsnotify.Event, err error) {
+	select {
+	case err = <-w.watcher.Errors:
+	case evt = <-w.fileChanged:
 	}
-	return stat.IsDir()
+	return evt, err
 }
 
-func concurrentDispatcher(w *WatchedDir) {
-	for evt := range w.fileChanged {
+func concurrentDispatcher(w *WatchedDir) error {
+	for {
+		evt, err := w.nextEvent()
+		if err != nil {
+			return err
+		}
 		go w.options.Handler(evt.Op, evt.Name, context.Background())
 	}
 }
 
-func killDispatcher(w *WatchedDir) {
+func killDispatcher(w *WatchedDir) error {
 	ctx, cancel := context.WithCancel(context.Background())
-	for evt := range w.fileChanged {
+	for {
+		evt, err := w.nextEvent()
 		cancel()
+		if err != nil {
+			return err
+		}
 		ctx, cancel = context.WithCancel(context.Background())
 		go w.options.Handler(evt.Op, evt.Name, ctx)
 	}
-	cancel()
 }
 
-func queueDispatcher(w *WatchedDir, n int) {
-	ch := make(chan fsnotify.Event, n)
+func queueDispatcher(w *WatchedDir, n int) (err error) {
+	queue := make(chan fsnotify.Event, n)
 	go func() {
-		for evt := range w.fileChanged {
+    var evt fsnotify.Event
+		for {
+			evt, err = w.nextEvent()
+			if err != nil {
+        close(queue)
+        return
+			}
 			select {
 			// If the buffer is not full, add the new event
-			case ch <- evt:
+			case queue <- evt:
 				// If the buffer is full, evict the oldest event and add the new one
 			default:
-				<-ch
-				ch <- evt
+				<-queue
+				queue <- evt
 			}
 		}
 	}()
 
-	for evt := range ch {
+	for evt := range queue {
 		w.options.Handler(evt.Op, evt.Name, context.Background())
 	}
+  return
 }
 
-func blockingDispatcher(w *WatchedDir) {
+func blockingDispatcher(w *WatchedDir) error {
 	mut := sync.Mutex{}
-	for evt := range w.fileChanged {
+	for {
+		evt, err := w.nextEvent()
+		if err != nil {
+      return err
+		}
 		if mut.TryLock() {
 			e := evt
 			go func() {
@@ -218,7 +248,7 @@ func blockingDispatcher(w *WatchedDir) {
 	}
 }
 
-func WatchItems(items []string, options *Options) {
+func WatchItems(items []string, options *Options) (err error) {
 	if options == nil {
 		panic("No options set.")
 	}
@@ -231,12 +261,13 @@ func WatchItems(items []string, options *Options) {
 
 	switch options.Mode {
 	case Concurrent:
-		concurrentDispatcher(watcher)
+		err = concurrentDispatcher(watcher)
 	case Kill:
-		killDispatcher(watcher)
+		err = killDispatcher(watcher)
 	case Block:
-		blockingDispatcher(watcher)
+		err = blockingDispatcher(watcher)
 	case Queue:
-		queueDispatcher(watcher, options.QueueSize)
+		err = queueDispatcher(watcher, options.QueueSize)
 	}
+  return
 }

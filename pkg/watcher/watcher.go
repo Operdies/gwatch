@@ -284,6 +284,7 @@ func WatchItems(items []string, options *Options, handler Handler) (err error) {
 	}
 
 	watcher := Create(items, options)
+	watcher.handler = handler
 	go watcher.watchEvents()
 
 	switch options.Mode {

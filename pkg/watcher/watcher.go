@@ -111,13 +111,21 @@ func fileExists(file string) bool {
 func (w *WatchedDir) walkAndAddAll(root string, emit bool) {
 	if isDir(root) {
 		filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-			if d.IsDir() {
-				if w.options.IncludeHidden == false && isHidden(d.Name()) {
-					return nil
+
+			if w.options.IncludeHidden == false {
+				if isHidden(d.Name()) {
+					if d.IsDir() {
+						return fs.SkipDir
+					} else {
+						return nil
+					}
 				}
+			}
+
+			if d.IsDir() {
 				err := w.watcher.Add(path)
 				if err != nil {
-					fmt.Printf("Error adding watch: %v\n", err.Error())
+					fmt.Printf("Error waching '%v': %v\n", path, err.Error())
 				}
 			}
 
@@ -130,7 +138,7 @@ func (w *WatchedDir) walkAndAddAll(root string, emit bool) {
 	} else if fileExists(root) { // verify the file hasn't already been deleted
 		err := w.watcher.Add(root)
 		if err != nil {
-			fmt.Printf("Error adding watch: %v\n", err.Error())
+			fmt.Printf("Error waching '%v': %v\n", root, err.Error())
 		}
 	}
 }

@@ -63,3 +63,6 @@ Usage: gwatch [OPTIONS]... [PATHS]...
         This restriction does not apply if instead the directory containing the file is being watched.
 ```
 
+# Examples 
+
+Check out the [examples](./examples/).

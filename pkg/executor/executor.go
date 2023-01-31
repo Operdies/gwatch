@@ -34,7 +34,7 @@ func (executor *Executor) Execute(op fsnotify.Op, path string, context context.C
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
   err := cmd.Run()
-  if err != nil {
+  if err != nil && context.Err() == nil {
     fmt.Fprintf(os.Stderr, "Error running command: %v\n", err)
   }
 }

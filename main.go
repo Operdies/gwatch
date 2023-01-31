@@ -1,58 +1,17 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
-	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/operdies/gwatch/pkg/watcher"
+	"github.com/operdies/gwatch/pkg/executor"
 )
 
-var Command string
 var options watcher.Options
 
-var OnChange watcher.Handler = func(op fsnotify.Op, path string, context context.Context) {
-	if Command == "" {
-		return
-	}
-
-	opname := watcher.Sanitize(op.String())
-	filename := watcher.Sanitize(path)
-	c := strings.ReplaceAll(Command, "%f", filename)
-	c = strings.ReplaceAll(c, "%e", opname)
-
-	cmd := exec.Command("bash", "-c", c)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	select {
-	case <-context.Done():
-		return
-	default:
-		err := cmd.Start()
-		if err != nil {
-			fmt.Printf("Error running command %v: %v\n", c, err)
-			return
-		}
-		if options.Mode == watcher.Kill {
-			go func() {
-				<-context.Done()
-				if err := cmd.Process.Kill(); err != nil {
-					text := err.Error()
-					if strings.Contains(text, "process already finished") {
-						return
-					}
-					fmt.Printf("failed to kill process: %v", text)
-				}
-			}()
-		}
-		cmd.Wait()
-		return
-	}
-}
 
 func parseEventMask(mask string) (op fsnotify.Op, err error) {
 	parts := strings.Split(mask, "|")
@@ -137,6 +96,7 @@ Kill:
 
 	flag.StringVar(&eventString, "eventMask", "Create|Write|Remove|Rename|Chmod", "Mask of events to watch.")
 
+  var Command string
 	flag.StringVar(&Command, "command", "echo %e %f",
 		`The command to run when a file changes. Invoked as "bash -c '<command>'"
 Simple string replacement is supported to respond to what happened:
@@ -176,7 +136,8 @@ No escaping is done on the provided command.`)
 		EventMask:     eventMask,
 	}
 
-	err = watcher.WatchItems(items, &options, OnChange)
+  exec := executor.Create(Command)
+	err = watcher.WatchItems(items, &options, exec.Execute)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 	}

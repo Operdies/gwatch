@@ -143,18 +143,26 @@ func (w *WatchedDir) walkAndAddAll(root string, emit bool) {
 	}
 }
 
+func stripPathChars(s string) string {
+	if len(s) > 2 && s[:2] == "./" {
+		return s[2:]
+	}
+	return s
+}
+
 func Create(paths []string, options *Options) *WatchedDir {
 	var w = WatchedDir{fileChanged: make(chan fsnotify.Event), options: options}
 	w.watcher, _ = fsnotify.NewWatcher()
 	patterns := make([]string, 0)
+
 	anyPaths := false
 	for _, p := range paths {
-		// If the path contains any wildcards, interpret it as a pattern
-		if strings.IndexAny(p, "*") >= 0 {
-			patterns = append(patterns, p)
-		} else {
-			anyPaths = true
+		if isDir(p) {
 			w.walkAndAddAll(p, false)
+			anyPaths = true
+		} else {
+			// If the path contains any wildcards, interpret it as a pattern
+			patterns = append(patterns, stripPathChars(p))
 		}
 	}
 
@@ -199,8 +207,20 @@ func match(pattern, input []byte) bool {
 					return true
 				}
 			}
+
+			// Handle the case where * matches nothing
+			if match(pattern[2:], input) {
+				return true
+			}
+
 		} else {
 			// * -- match anything but forward slash
+
+			// Handle the case where * matches nothing
+			if match(pattern[1:], input) {
+				return true
+			}
+
 			for i, c := range input {
 				if c == '/' {
 					return false
@@ -236,10 +256,7 @@ func (w *WatchedDir) watchEvents() {
 		// Sometimes duplicate events are emitted, e.g.
 		// 1: REMOVE ./a
 		// 2: REMOVE a
-		// Let's just always remove leading './'
-		if len(evt.Name) > 2 && evt.Name[:2] == "./" {
-			evt.Name = evt.Name[2:]
-		}
+		evt.Name = stripPathChars(evt.Name)
 
 		if evt.Op.Has(fsnotify.Create) && isDir(evt.Name) {
 			go func() {

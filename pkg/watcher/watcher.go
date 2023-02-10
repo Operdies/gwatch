@@ -146,9 +146,24 @@ func (w *WatchedDir) walkAndAddAll(root string, emit bool) {
 func Create(paths []string, options *Options) *WatchedDir {
 	var w = WatchedDir{fileChanged: make(chan fsnotify.Event), options: options}
 	w.watcher, _ = fsnotify.NewWatcher()
+	patterns := make([]string, 0)
+	anyPaths := false
 	for _, p := range paths {
-		w.walkAndAddAll(p, false)
+		// If the path contains any wildcards, interpret it as a pattern
+		if strings.IndexAny(p, "*") >= 0 {
+			patterns = append(patterns, p)
+		} else {
+			anyPaths = true
+			w.walkAndAddAll(p, false)
+		}
 	}
+
+	// If a pattern was specified, but no paths were, recursively walk the current directory.
+	if anyPaths == false {
+		w.walkAndAddAll(".", false)
+	}
+
+	w.patterns = patterns
 	return &w
 }
 
@@ -156,6 +171,57 @@ func isHidden(name string) bool {
 	segments := strings.Split(name, "/")
 	for _, n := range segments {
 		if len(n) > 1 && n[0] == '.' {
+			return true
+		}
+	}
+	return false
+}
+
+// Primitive glob matcher that understands * to mean 'anything but slash' and ** to mean 'anything'
+func match(pattern, input []byte) bool {
+	// If both strings are exhausted, we have a match
+	if len(pattern) == 0 && len(input) == 0 {
+		return true
+	}
+
+	// If either string is exhausted, there is no match
+	if len(pattern) == 0 || len(input) == 0 {
+		return false
+	}
+
+	if pattern[0] == '*' {
+		if len(pattern) > 1 && pattern[1] == '*' {
+			// ** -- match anything
+			for i := range input {
+				// Check in reverse. This is optimistic.
+				// The idea is to consume as many characters as possible since typical patterns are expected to be patterns like '*.go'
+				if match(pattern[2:], input[len(input)-i:]) {
+					return true
+				}
+			}
+		} else {
+			// * -- match anything but forward slash
+			for i, c := range input {
+				if c == '/' {
+					return false
+				}
+				if match(pattern[1:], input[i+1:]) {
+					return true
+				}
+			}
+		}
+	}
+
+	if pattern[0] == input[0] {
+		return match(pattern[1:], input[1:])
+	}
+
+	return false
+}
+
+func (w *WatchedDir) anyMatch(input string) bool {
+	for _, pattern := range w.patterns {
+		if match([]byte(pattern), []byte(input)) {
 			return true
 		}
 	}
@@ -174,6 +240,7 @@ func (w *WatchedDir) watchEvents() {
 		if len(evt.Name) > 2 && evt.Name[:2] == "./" {
 			evt.Name = evt.Name[2:]
 		}
+
 		if evt.Op.Has(fsnotify.Create) && isDir(evt.Name) {
 			go func() {
 				// This is for the edge case where e.g. a hierarchy is created like `mkdir -p a/b/c`, and b/c appears before the watcher has started watching `a`
@@ -182,6 +249,13 @@ func (w *WatchedDir) watchEvents() {
 			}()
 		}
 		if w.options.EventMask.Has(evt.Op) {
+			// if any patterns are defined, filter any event which doesn't match.
+			if len(w.patterns) > 0 {
+				if w.anyMatch(evt.Name) == false {
+					continue
+				}
+			}
+
 			w.fileChanged <- evt
 		}
 	}
@@ -192,7 +266,8 @@ type WatchedDir struct {
 	fileChanged chan fsnotify.Event
 	options     *Options
 	// The function which is invoked when an event occurs
-	handler Handler
+	handler  Handler
+	patterns []string
 }
 
 func Sanitize(s string) string {

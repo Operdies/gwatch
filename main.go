@@ -6,12 +6,11 @@ import (
 	"strings"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/operdies/gwatch/pkg/watcher"
 	"github.com/operdies/gwatch/pkg/executor"
+	"github.com/operdies/gwatch/pkg/watcher"
 )
 
 var options watcher.Options
-
 
 func parseEventMask(mask string) (op fsnotify.Op, err error) {
 	parts := strings.Split(mask, "|")
@@ -96,7 +95,7 @@ Kill:
 
 	flag.StringVar(&eventString, "eventMask", "Create|Write|Remove|Rename|Chmod", "Mask of events to watch.")
 
-  var Command string
+	var Command string
 	flag.StringVar(&Command, "command", "echo %e %f",
 		`The command to run when a file changes. Invoked as "bash -c '<command>'"
 Simple string replacement is supported to respond to what happened:
@@ -136,7 +135,7 @@ No escaping is done on the provided command.`)
 		EventMask:     eventMask,
 	}
 
-  exec := executor.Create(Command)
+	exec := executor.Create(Command)
 	err = watcher.WatchItems(items, &options, exec.Execute)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)

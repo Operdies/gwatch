@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"golang.org/x/exp/slices"
 )
 
 var (
@@ -111,9 +112,22 @@ func fileExists(file string) bool {
 func (w *WatchedDir) walkAndAddAll(root string, emit bool) {
 	if isDir(root) {
 		filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+
+			link, err := os.Readlink(path)
+			if err == nil {
+				if slices.Contains(w.links, link) {
+					return nil
+				}
+				w.links = append(w.links, link)
+				w.walkAndAddAll(link, emit)
+				return nil
+			}
 
 			if w.options.IncludeHidden == false {
-				if isHidden(d.Name()) {
+				if w.isHidden(d.Name()) && path != root {
 					if d.IsDir() {
 						return fs.SkipDir
 					} else {
@@ -141,6 +155,10 @@ func (w *WatchedDir) walkAndAddAll(root string, emit bool) {
 			fmt.Printf("Error waching '%v': %v\n", root, err.Error())
 		}
 	}
+
+	// Sort the links by length. Otherwise we can encounter edge-cases in w.isHidden
+	// where files from nested symbolic links are incorrectly treated as hidden
+	slices.SortFunc(w.links, func(a, b string) bool { return len(a) > len(b) })
 }
 
 func stripPathChars(s string) string {
@@ -151,7 +169,7 @@ func stripPathChars(s string) string {
 }
 
 func Create(paths []string, options *Options) *WatchedDir {
-	var w = WatchedDir{fileChanged: make(chan fsnotify.Event), options: options}
+	var w = WatchedDir{fileChanged: make(chan fsnotify.Event), options: options, paths: paths}
 	w.watcher, _ = fsnotify.NewWatcher()
 	patterns := make([]string, 0)
 
@@ -171,18 +189,49 @@ func Create(paths []string, options *Options) *WatchedDir {
 		w.walkAndAddAll(".", false)
 	}
 
+	if len(patterns) == 0 {
+		patterns = append(patterns, "**")
+	}
 	w.patterns = patterns
+	// Put the shortest patterns first, as these are likely more generic
+	slices.SortFunc(w.patterns, func(a, b string) bool { return len(a) < len(b) })
+  // Put the longest paths first for future hidden checks 
+	slices.SortFunc(w.paths, func(a, b string) bool { return len(a) > len(b) })
 	return &w
 }
 
-func isHidden(name string) bool {
-	segments := strings.Split(name, "/")
-	for _, n := range segments {
-		if len(n) > 1 && n[0] == '.' {
-			return true
+func (w *WatchedDir) isHidden(name string) bool {
+	// A file is considered hidden if the filename itself,
+	// or any of its parent directories start with a '.'
+	isHidden := func(name string) bool {
+		segments := strings.Split(name, "/")
+		for _, n := range segments {
+			if len(n) > 1 && n[0] == '.' {
+				return true
+			}
+		}
+		return false
+	}
+
+	// If a hidden directory was added directly, we should not
+	// consider all files inside of it hidden.
+	for _, p := range w.paths {
+		if strings.HasPrefix(name, p) {
+			return isHidden(name[len(p):])
 		}
 	}
-	return false
+
+	// If this file was added by following a symbolic link,
+	// strip their common prefix in order to not treat it as hidden.
+	// This is for edge cases where a symbolic link was followed
+	// into a hidden directory, where the file itself should not be hidden
+	for _, l := range w.links {
+		if strings.HasPrefix(name, l) {
+			return isHidden(name[len(l):])
+		}
+	}
+
+	return isHidden(name)
 }
 
 // Primitive glob matcher that understands * to mean 'anything but slash' and ** to mean 'anything'
@@ -250,7 +299,7 @@ func (w *WatchedDir) anyMatch(input string) bool {
 
 func (w *WatchedDir) watchEvents() {
 	for evt := range w.watcher.Events {
-		if w.options.IncludeHidden == false && isHidden(evt.Name) {
+		if w.options.IncludeHidden == false && w.isHidden(evt.Name) {
 			continue
 		}
 		// Sometimes duplicate events are emitted, e.g.
@@ -266,11 +315,9 @@ func (w *WatchedDir) watchEvents() {
 			}()
 		}
 		if w.options.EventMask.Has(evt.Op) {
-			// if any patterns are defined, filter any event which doesn't match.
-			if len(w.patterns) > 0 {
-				if w.anyMatch(evt.Name) == false {
-					continue
-				}
+			// filter any event which doesn't match.
+			if w.anyMatch(evt.Name) == false {
+				continue
 			}
 
 			w.fileChanged <- evt
@@ -285,6 +332,10 @@ type WatchedDir struct {
 	// The function which is invoked when an event occurs
 	handler  Handler
 	patterns []string
+	// Maintain a list of links that were followed to prevent an infinite loop
+	links []string
+	// Keep a list of originally added paths
+	paths []string
 }
 
 func Sanitize(s string) string {

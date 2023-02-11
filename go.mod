@@ -2,8 +2,8 @@ module github.com/operdies/gwatch
 
 go 1.19
 
-require github.com/fsnotify/fsnotify v1.6.0
-
 require (
-	golang.org/x/sys v0.0.0-20220908164124-27713097b956 // indirect
+	github.com/fsnotify/fsnotify v1.6.0
+	golang.org/x/exp v0.0.0-20230210204819-062eb4c674ab
+	golang.org/x/sys v0.1.0 // indirect
 )

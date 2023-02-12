@@ -57,12 +57,12 @@ Usage: gwatch [OPTIONS]... [PATHS]...
         Creating new subdirectories in a watched directory will automatically add the new directories to the watch list.
         When files are added and removed from watched directories, they are also automatically added and removed from the watch list.
 
-        If a file is watched, events will only be generated for that file. In other words, if the file is deleted,
-        and a new file is created with the same name, events will not be generated for the new file.
-        For the same reason, it is not possible to watch a file which does not yet exist.
-        This restriction does not apply if instead the directory containing the file is being watched.
+        The globbing wildcards * and ** are supported. Any PATH which is not a directory is interpreted as a pattern.
+        If no patterns are supplied, everything is considered a match. Otherwise only files which match at least one pattern are included.
+        If calling from a shell, remember to single quote patterns. Otherwise the shell will expand them before starting the program.
 ```
 
 # Examples 
 
 Check out the [examples](./examples/).
+

@@ -35,6 +35,12 @@ func (executor *Executor) Execute(op fsnotify.Op, path string, context context.C
 	cmd.Stderr = os.Stderr
 	err := cmd.Run()
 	if err != nil && context.Err() == nil {
-		fmt.Fprintf(os.Stderr, "Error running command: %v\n", err)
+		switch err.(type) {
+		// Ignore ExitErrors. If the action errored, then the stderr output should tell us what's wrong.
+		case *exec.ExitError:
+			return
+		default:
+			fmt.Fprintf(os.Stderr, "Error running command: %v\n", err)
+		}
 	}
 }

@@ -33,6 +33,7 @@ func (executor *Executor) Execute(op fsnotify.Op, path string, context context.C
 	cmd := exec.CommandContext(context, "bash", "-c", c)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
 	err := cmd.Run()
 	if err != nil && context.Err() == nil {
 		switch err.(type) {

@@ -195,7 +195,7 @@ func Create(paths []string, options *Options) *WatchedDir {
 	w.patterns = patterns
 	// Put the shortest patterns first, as these are likely more generic
 	slices.SortFunc(w.patterns, func(a, b string) bool { return len(a) < len(b) })
-  // Put the longest paths first for future hidden checks 
+	// Put the longest paths first for future hidden checks
 	slices.SortFunc(w.paths, func(a, b string) bool { return len(a) > len(b) })
 	return &w
 }

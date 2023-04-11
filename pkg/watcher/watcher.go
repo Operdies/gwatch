@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -31,6 +32,13 @@ var (
 type Mode struct {
 	mode int
 }
+
+type EmitterOption = int
+
+const (
+	Emit   EmitterOption = 1
+	NoEmit EmitterOption = 2
+)
 
 func (m Mode) String() string {
 	if m == Concurrent {
@@ -109,7 +117,7 @@ func fileExists(file string) bool {
 	return err == nil
 }
 
-func (w *WatchedDir) walkAndAddAll(root string, emit bool) {
+func (w *WatchedDir) walkAndAddAll(root string, emit EmitterOption) {
 	if isDir(root) {
 		filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
@@ -139,11 +147,11 @@ func (w *WatchedDir) walkAndAddAll(root string, emit bool) {
 			if d.IsDir() {
 				err := w.watcher.Add(path)
 				if err != nil {
-					fmt.Printf("Error waching '%v': %v\n", path, err.Error())
+					fmt.Printf("Error watching '%v': %v\n", path, err.Error())
 				}
 			}
 
-			if path != root && emit {
+			if path != root && emit == Emit {
 				w.watcher.Events <- fsnotify.Event{Op: fsnotify.Create, Name: path}
 			}
 
@@ -152,7 +160,7 @@ func (w *WatchedDir) walkAndAddAll(root string, emit bool) {
 	} else if fileExists(root) { // verify the file hasn't already been deleted
 		err := w.watcher.Add(root)
 		if err != nil {
-			fmt.Printf("Error waching '%v': %v\n", root, err.Error())
+			fmt.Printf("Error watching '%v': %v\n", root, err.Error())
 		}
 	}
 
@@ -176,17 +184,36 @@ func Create(paths []string, options *Options) *WatchedDir {
 	anyPaths := false
 	for _, p := range paths {
 		if isDir(p) {
-			w.walkAndAddAll(p, false)
+			w.walkAndAddAll(p, NoEmit)
 			anyPaths = true
 		} else {
+			stripped := stripPathChars(p)
 			// If the path contains any wildcards, interpret it as a pattern
-			patterns = append(patterns, stripPathChars(p))
+			patterns = append(patterns, stripped)
+		}
+	}
+
+	// If a pattern starts with a '/', it could be rooted outside of the working directory
+	// In order to get such events, we should watch the root directory of the pattern
+	// E.g. a pattern such as /hello/world/**/abc.txt should watch /hello/world
+	for _, p := range patterns {
+		if len(p) > 0 && p[0] == '/' {
+			segments := strings.Split(p, "/")
+			cnt := len(segments) - 1
+			for i, s := range segments {
+				if strings.Contains(s, "*") {
+					cnt = i
+					break
+				}
+			}
+			toWatch := "/" + path.Join(segments[:cnt]...)
+			w.walkAndAddAll(toWatch, NoEmit)
 		}
 	}
 
 	// If a pattern was specified, but no paths were, recursively walk the current directory.
 	if anyPaths == false {
-		w.walkAndAddAll(".", false)
+		w.walkAndAddAll(".", NoEmit)
 	}
 
 	if len(patterns) == 0 {
@@ -311,7 +338,7 @@ func (w *WatchedDir) watchEvents() {
 			go func() {
 				// This is for the edge case where e.g. a hierarchy is created like `mkdir -p a/b/c`, and b/c appears before the watcher has started watching `a`
 				time.Sleep(time.Millisecond * 100)
-				w.walkAndAddAll(evt.Name, true)
+				w.walkAndAddAll(evt.Name, Emit)
 			}()
 		}
 		if w.options.EventMask.Has(evt.Op) {
